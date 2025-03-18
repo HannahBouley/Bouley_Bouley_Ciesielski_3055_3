@@ -7,9 +7,15 @@ import java.util.concurrent.Executors;
 
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
+import merrimackutil.json.JSONSerializable;
+import merrimackutil.json.JsonIO;
+import merrimackutil.json.parser.JSONParser;
+import merrimackutil.json.types.JSONObject;
+import merrimackutil.json.types.JSONType;
 import merrimackutil.util.Tuple;
 
 import java.io.*;
+import java.lang.reflect.InaccessibleObjectException;
 import java.net.*;
 import java.util.concurrent.*;
 
@@ -18,9 +24,12 @@ import java.util.concurrent.*;
  * The server in which the client will connect to
  */
 public class KDCServer {
+    // For reference: ./test-data/kdc-config/config.json
 
     private static final int POOL_SIZE = 10; // MAX NUM OF CONNECTIONS
-    private static final int PORT_NUMBER = 5001; // PORT NUMBER THE SERVER IS RUNS ON
+    private static int PORT_NUMBER = 0; // PORT NUMBER THE SERVER IS RUNS ON
+    private static String secretsFile = null;
+    private static String validityPeriod = null;
 
     // Entry point for the server
     public static void main(String[] args) {
@@ -30,14 +39,19 @@ public class KDCServer {
         // Create a new thread pool to handle server-client connections
         ExecutorService executor = Executors.newFixedThreadPool(POOL_SIZE);
 
+        System.out.println(PORT_NUMBER);
         // Create a server socket with a port number
         try(ServerSocket serverSocket = new ServerSocket(PORT_NUMBER)){
+            
+            System.out.println("Server is running");
 
             // Always keep the server running to accept incoming request from clients
             while (true) {
                 Socket socket = serverSocket.accept(); // Accept a new client to the server
 
                 executor.submit(new HandleClientConnections(socket));
+
+
                             }
                         } catch (IOException e){
                             e.printStackTrace();
@@ -79,12 +93,24 @@ public class KDCServer {
                     System.out.println("    -c, --config Set the config file.");
                     System.out.println("    -h, --help Display the help.");
 
+                    // Exit since only the menu was displayed
+                    System.exit(1);
                     break;
 
                 case 'c': // Configure a file
+                    System.out.println("Configuring file...");
 
-                    File configFile = new File(currOpt.getSecond());
+                    try {
+                        
+                        // Configure using the file path
+                        config(JsonIO.readObject(new File(currOpt.getSecond())));
 
+                    } catch (Exception e) {
+                        
+                        e.printStackTrace();
+                    }
+
+                    
                     break;
 
 
@@ -99,6 +125,44 @@ public class KDCServer {
         }
         
     }
+
+    /**
+     * Configure the server by reading a JSON file
+     */
+    private static void config(JSONType obj) throws Exception{
+
+        JSONObject tmp;
+
+        if (obj instanceof JSONObject){
+            tmp = (JSONObject) obj;
+
+            if (tmp.containsKey("secrets-file")){
+                
+                secretsFile = tmp.getString("secrets-file");
+            } else {
+                throw new InvalidObjectException("Expected field: secrets-file");
+                
+            }
+
+            if (tmp.containsKey("port")){
+                PORT_NUMBER = tmp.getInt("port");
+            } else {
+                throw new InvalidObjectException("Expected field: port");
+
+            }
+
+            if (tmp.containsKey("validity-period")){
+                validityPeriod = tmp.getString("validity-period");
+            } else {
+                throw new InaccessibleObjectException("Expected field: validity-period");
+            }
+
+            System.out.println("File configured!");
+        }
+        
+    }
+
+
 }
 
                 
