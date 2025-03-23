@@ -3,6 +3,11 @@ package client;
 import javax.crypto.*;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
+
+import merrimackutil.cli.LongOption;
+import merrimackutil.cli.OptionParser;
+import merrimackutil.util.Tuple;
+
 import javax.crypto.spec.IvParameterSpec;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
@@ -13,7 +18,19 @@ import java.util.Scanner;
 
 public class KDCClient {
 
+    /*
+     * For reference:
+     * 
+     * java -jar dist/kdcclient.jar -c
+     */
+
+    private static String hostsFile = null;
+    private static String userName = null;
+    private static String service = null;
+
     public static void main(String[] args) throws Exception {
+        
+        // First prompt user for creds
         Scanner scanner = new Scanner(System.in);
 
         //Get user input securely
@@ -55,6 +72,21 @@ public class KDCClient {
         java.util.Arrays.fill(passwordChars, '\0');
 
         scanner.close();
+
+        if (args.length < 1){
+            // Display the help only
+            System.out.println("usage:");
+            System.out.println("    client --hosts <hostfile> --user <user> --service <service>");
+            System.out.println("    client --user <user> --service <service>");
+            System.out.println("options:");
+            System.out.println("    -h, --hosts Set the hosts file.");
+            System.out.println("    -u, --user The user name.");
+            System.out.println("    -s, --service The name of the service");
+        } else {
+            // Handle the now opts
+            handleCommandLineInputs(args);
+        }
+        
     }
 
     //Generate a random salt
@@ -98,6 +130,50 @@ public class KDCClient {
         Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
         cipher.init(Cipher.DECRYPT_MODE, secretKey, iv);
         return cipher.doFinal(Base64.getDecoder().decode(encryptedData));
+    }
+
+    private static void handleCommandLineInputs(String[] args){
+
+        OptionParser optParser = new OptionParser(args);
+        Tuple<Character, String> currOpt;
+
+        optParser.setOptString("h:u:s:");
+
+        LongOption[] longOpts = new LongOption[3];
+
+        longOpts[0] = new LongOption("hostsFile", true, 'h');
+        longOpts[1] = new LongOption("userName", true, 'u');
+        longOpts[2] = new LongOption("service", true, 's');
+
+        optParser.setLongOpts(longOpts);
+
+        while(optParser.getOptIdx() != args.length){
+            currOpt = optParser.getLongOpt(false);
+
+            switch (currOpt.getFirst()) {
+                case 'h': // The hosts file
+                    hostsFile = currOpt.getSecond();
+                    break;
+            
+                case 'u': // The user name
+                    userName = currOpt.getSecond();
+                    break;
+
+                case 's': // The name of the service
+                    service = currOpt.getSecond();
+
+                    break;
+
+                case '?': // Done with operations
+
+                    break;
+                default:
+                    break;
+            }
+        }
+
+
+
     }
 
 }
