@@ -211,11 +211,15 @@ class HandleClientConnections implements Runnable{
 
                     tmpArry = (JSONArray) tmp.getArray("secrets");
 
+                  
                     for (int i = 0; i < tmpArry.size(); i++){
                         if(tmpArry.getObject(i).getString("user").equals(userName)){
                             System.out.println("user found!");
-                        } else {
-                            throw new InvalidObjectException("The user was not found");
+                            break;
+                        } 
+
+                        if(!tmpArry.getObject(i).getString("user").equals(userName) && i == tmpArry.size() - 1){
+                            throw new InaccessibleObjectException("User was not found");
                         }
                     }                    
                 } else {
@@ -227,6 +231,7 @@ class HandleClientConnections implements Runnable{
         } else {
             throw new InaccessibleObjectException("Expeted JSON object");
         }
+    
         return Base64.getEncoder().encodeToString(nonce);
     }
 
@@ -241,7 +246,6 @@ class HandleClientConnections implements Runnable{
     public void run() {
         try {
 
-            byte[] nonce = nonceCache.getNonce();
             // Recieve input from the client
             DataInputStream recieve = new DataInputStream(socket.getInputStream());
 
@@ -254,15 +258,18 @@ class HandleClientConnections implements Runnable{
 
             System.out.println(userName);
             System.out.println(password);
-            /*
-            // Send the challege back to the user
-            send.writeUTF(generateChallenge(userName));
+            
+            String challengeString = generateChallenge(userName);
+            //System.out.println(challengeString);
 
+            // Send the challege back to the user
+            send.writeUTF(challengeString);
+            
             // Get the response hash from the clint
             String challengeResponse = recieve.readUTF();
 
             // Server side computed hash
-            String expectedHash = hash(nonce + password);
+            String expectedHash = hash(challengeString + password);
 
             // Check to see if the hash is the same 
             if (challengeResponse.equals(expectedHash)){
@@ -271,7 +278,7 @@ class HandleClientConnections implements Runnable{
                 send.writeUTF("ACCESS DENIED");
                 System.exit(1);
             }
-            */
+            
 
         } catch (Exception e) {
             

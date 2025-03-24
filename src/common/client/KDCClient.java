@@ -100,14 +100,29 @@ public class KDCClient {
         // Start the connection with the server
         try {
             
+            // The socket representing the client's end
             Socket clientSok = new Socket("127.0.0.1", 5000);
 
              // Set up the streams for the socket.
             DataInputStream recv = new DataInputStream(clientSok.getInputStream());
             DataOutputStream send = new DataOutputStream(clientSok.getOutputStream());
 
+            // Send over the username and password to the server
             send.writeUTF(userName);
             send.writeUTF(password);
+
+            // Get the nonce back from the server
+            String nonce = recv.readUTF();
+
+            //Compute the hash with the nonce and password
+            String responseHash = hash(nonce + password);
+
+            // Send over the computed hash to the server
+            send.writeUTF(responseHash);
+            
+            // Response to user. Either valid or not.
+            String valitated = recv.readUTF();
+            System.out.println(valitated);
 
            } catch (Exception e) {
                 e.printStackTrace();
@@ -157,6 +172,12 @@ public class KDCClient {
         Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
         cipher.init(Cipher.DECRYPT_MODE, secretKey, iv);
         return cipher.doFinal(Base64.getDecoder().decode(encryptedData));
+    }
+
+    private static String hash(String input) throws NoSuchAlgorithmException {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] hashBytes = md.digest(input.getBytes());
+        return Base64.getEncoder().encodeToString(hashBytes);
     }
 
     private static void handleCommandLineInputs(String[] args){
