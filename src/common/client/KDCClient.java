@@ -14,6 +14,10 @@ import java.security.*;
 import java.security.spec.KeySpec;
 import java.util.Base64;
 import java.io.Console;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.PrintWriter;
+import java.net.Socket;
 import java.util.Scanner;
 
 public class KDCClient {
@@ -21,23 +25,25 @@ public class KDCClient {
     /*
      * For reference:
      * 
-     * java -jar dist/kdcclient.jar -c
+     * java -jar dist/kdcclient.jar -h EchoService.java -u alice -s echoService
      */
 
+    private static final boolean trace = true; // Toggle tracing
+    
     private static String hostsFile = null;
     private static String userName = null;
     private static String service = null;
+    private static String password = null;
 
     public static void main(String[] args) throws Exception {
         
         // First prompt user for creds
         Scanner scanner = new Scanner(System.in);
 
-        //Get user input securely
-        System.out.print("Enter username: ");
-        String username = scanner.nextLine();
+        // For reference use: alice, password --should allow access
+        // For reference use: alice, badpassword --should deny access
 
-        //Secure password input handling
+        //Secure password input handling (no echo)
         Console console = System.console();
         char[] passwordChars;
         if (console != null) {
@@ -46,7 +52,7 @@ public class KDCClient {
             System.out.print("Enter password (input hidden not supported): ");
             passwordChars = scanner.nextLine().toCharArray();
         }
-        String password = new String(passwordChars);
+        password = new String(passwordChars);
 
         //Hash the password securely with PBKDF2
         byte[] salt = generateSalt();
@@ -58,12 +64,14 @@ public class KDCClient {
         String encryptedPassword = encrypt(hashedPassword, secretKey, iv);
 
         //Output encrypted data
-        System.out.println("\nUsername: " + username);
-        System.out.println("Salt (Base64): " + Base64.getEncoder().encodeToString(salt));
-        System.out.println("Encrypted Hashed Password: " + encryptedPassword);
-        System.out.println("Secret Key (Base64): " + Base64.getEncoder().encodeToString(secretKey.getEncoded()));
-        System.out.println("IV (Base64): " + Base64.getEncoder().encodeToString(iv.getIV()));
-
+        if (trace){
+            System.out.println("\nUsername: " + userName);
+            System.out.println("Salt (Base64): " + Base64.getEncoder().encodeToString(salt));
+            System.out.println("Encrypted Hashed Password: " + encryptedPassword);
+            System.out.println("Secret Key (Base64): " + Base64.getEncoder().encodeToString(secretKey.getEncoded()));
+            System.out.println("IV (Base64): " + Base64.getEncoder().encodeToString(iv.getIV()));
+        }
+       
         //Decrypt the hashed password
         byte[] decryptedHash = decrypt(encryptedPassword, secretKey, iv);
         System.out.println("\nDecrypted Hashed Password: " + Base64.getEncoder().encodeToString(decryptedHash));
@@ -82,10 +90,29 @@ public class KDCClient {
             System.out.println("    -h, --hosts Set the hosts file.");
             System.out.println("    -u, --user The user name.");
             System.out.println("    -s, --service The name of the service");
+
+           
         } else {
             // Handle the now opts
             handleCommandLineInputs(args);
         }
+
+        // Start the connection with the server
+        try {
+            
+            Socket clientSok = new Socket("127.0.0.1", 5000);
+
+             // Set up the streams for the socket.
+            DataInputStream recv = new DataInputStream(clientSok.getInputStream());
+            DataOutputStream send = new DataOutputStream(clientSok.getOutputStream());
+
+            send.writeUTF(password);
+            send.writeUTF(userName);
+
+           } catch (Exception e) {
+                e.printStackTrace();
+           }
+
         
     }
 
@@ -166,13 +193,14 @@ public class KDCClient {
 
                 case '?': // Done with operations
 
+                  
                     break;
                 default:
                     break;
             }
         }
 
-
+        
 
     }
 

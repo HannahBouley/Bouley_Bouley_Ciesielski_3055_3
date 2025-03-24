@@ -2,6 +2,8 @@ package kdcd;
 
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -19,6 +21,8 @@ import merrimackutil.util.Tuple;
 import java.io.*;
 import java.lang.reflect.InaccessibleObjectException;
 import java.net.*;
+import java.util.Base64;
+import java.util.Scanner;
 import java.util.concurrent.*;
 
 
@@ -34,7 +38,7 @@ public class KDCServer{
      * */ 
 
     private static final int POOL_SIZE = 10; // MAX NUM OF CONNECTIONS
-    private static final int nonceSize = 32;
+    private static final int NONCE_SIZE = 32; // THE SIZE OF THE NONCE FOR THE CACHE
     
     private static int PORT_NUMBER = 5000; // PORT NUMBER THE SERVER IS RUNS ON
     private static String secretsFile = "./test-data/kdc-config/secrets.json"; // FILE THAT HOLDS SECRETS
@@ -43,9 +47,6 @@ public class KDCServer{
 
     // Entry point for the server
     public static void main(String[] args) {
-
-        // Create a new Nonce
-        nonceCache = new NonceCache(nonceSize, 60000);
 
         // Read the commands on the command line
         handleCommandLineInput(args);
@@ -62,6 +63,7 @@ public class KDCServer{
             while (true) {
                 Socket socket = serverSocket.accept(); // Accept a new client to the server
 
+                System.out.println("connection recieved");
                 executor.submit(new HandleClientConnections(socket));
 
                             }
@@ -164,14 +166,38 @@ public class KDCServer{
             System.out.println("Server configured!");
         } 
     }
+    
+}
 
-    private static void generateChallenge(String userName) throws Exception{
+
+/**
+ * Handles client connections to the server
+ */
+class HandleClientConnections implements Runnable{
+                
+    private Socket socket; // The socket that represents the connection
+    private String userName;
+    private String password;
+
+    // Create a new nonce cache
+    private static NonceCache nonceCache = new NonceCache(32, 60000);
+
+    HandleClientConnections(Socket socket){
+        this.socket = socket;
+    }
+
+    /**
+     * Generates a random challenge that is sent to the specified user
+     * @param userName
+     * @throws Exception
+     */
+    private static String generateChallenge(String userName) throws Exception{
 
         // Create a new nonce
-        byte[] nonce = nonceCache.getNonce();
+        byte[] nonce = nonceCache.getNonce(); // This also adds it to the cache so we don't have to add it again
 
         // Determine if the username is in the secret store
-        JSONObject obj = JsonIO.readObject(new File("./test-data/kdc-config/" + secretsFile));
+        JSONObject obj = JsonIO.readObject(new File("./test-data/kdc-config/secrets.json"));
 
         JSONObject tmp;
         JSONArray tmpArry;
@@ -188,51 +214,69 @@ public class KDCServer{
                     for (int i = 0; i < tmpArry.size(); i++){
                         if(tmpArry.getObject(i).getString("user").equals(userName)){
                             System.out.println("user found!");
+                        } else {
+                            throw new InvalidObjectException("The user was not found");
                         }
-                    }
-
-                    
+                    }                    
                 } else {
-
                     throw new InvalidObjectException("Expected type: JSONArray");
                 }
-               
-
             } else {
-
                 throw new InvalidObjectException("Expected field: secrets");
-                
             }
+        } else {
+            throw new InaccessibleObjectException("Expeted JSON object");
         }
-
-
-
+        return Base64.getEncoder().encodeToString(nonce);
     }
 
-
-    public void sendChallengeToClient(){
-
+    private static String hash(String input) throws NoSuchAlgorithmException {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] hashBytes = md.digest(input.getBytes());
+        return Base64.getEncoder().encodeToString(hashBytes);
     }
 
-
-    
-}
-
-
-/**
- * Handles client connections to the server
- */
-class HandleClientConnections implements Runnable{
-                
-    private Socket socket;
-
-    HandleClientConnections(Socket socket){
-        this.socket = socket;
-    }
-
+    // Each client that is connected should have its own thread
     @Override
     public void run() {
-        
+        try {
+
+            byte[] nonce = nonceCache.getNonce();
+            // Recieve input from the client
+            DataInputStream recieve = new DataInputStream(socket.getInputStream());
+
+            // Send input to the client
+            DataOutputStream send = new DataOutputStream(socket.getOutputStream());
+            
+            // Receive the user name and password
+            userName = recieve.readUTF();
+            password = recieve.readUTF();
+
+            System.out.println(userName);
+            System.out.println(password);
+            /*
+            // Send the challege back to the user
+            send.writeUTF(generateChallenge(userName));
+
+            // Get the response hash from the clint
+            String challengeResponse = recieve.readUTF();
+
+            // Server side computed hash
+            String expectedHash = hash(nonce + password);
+
+            // Check to see if the hash is the same 
+            if (challengeResponse.equals(expectedHash)){
+                send.writeUTF("ACCESS GRANTED");
+            } else {
+                send.writeUTF("ACCESS DENIED");
+                System.exit(1);
+            }
+            */
+
+        } catch (Exception e) {
+            
+            e.printStackTrace();
+        }
         
     }
 
