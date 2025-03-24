@@ -177,7 +177,7 @@ class HandleClientConnections implements Runnable{
                 
     private Socket socket; // The socket that represents the connection
     private String userName;
-    private String password;
+    private static String password;
 
     // Create a new nonce cache
     private static NonceCache nonceCache = new NonceCache(32, 60000);
@@ -215,6 +215,8 @@ class HandleClientConnections implements Runnable{
                     for (int i = 0; i < tmpArry.size(); i++){
                         if(tmpArry.getObject(i).getString("user").equals(userName)){
                             System.out.println("user found!");
+                            password = tmpArry.getObject(i).getString("secret");
+                            System.out.println(password);
                             break;
                         } 
 
