@@ -106,8 +106,8 @@ public class KDCClient {
             DataInputStream recv = new DataInputStream(clientSok.getInputStream());
             DataOutputStream send = new DataOutputStream(clientSok.getOutputStream());
 
-            send.writeUTF(password);
             send.writeUTF(userName);
+            send.writeUTF(password);
 
            } catch (Exception e) {
                 e.printStackTrace();
