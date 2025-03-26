@@ -28,7 +28,7 @@ public class KDCClient {
      * java -jar dist/kdcclient.jar -h EchoService.java -u alice -s echoService
      */
 
-    private static final boolean trace = true; // Toggle tracing
+    private static final boolean trace = false; // Toggle tracing
     
     private static String hostsFile = null;
     private static String userName = null;
@@ -121,8 +121,14 @@ public class KDCClient {
             send.writeUTF(responseHash);
             
             // Response to user. Either valid or not.
-            String valitated = recv.readUTF();
-            System.out.println(valitated);
+            boolean valitated = recv.readBoolean();
+            
+            if (valitated){
+                System.out.println("ACCESS GRANTED");
+            } else {
+                System.out.println("ACCESS DENIED");
+                System.exit(1);
+            }
 
            } catch (Exception e) {
                 e.printStackTrace();
