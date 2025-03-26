@@ -10,6 +10,8 @@ import java.security.spec.InvalidKeySpecException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 
@@ -188,7 +190,7 @@ class HandleClientConnections implements Runnable{
     private static String userName;
     private static String password;
     private String salt;
-    private SecretKey rootKey;
+    private static SecretKey rootKey;
 
     // Create a new nonce cache
     private static NonceCache nonceCache = new NonceCache(NONCE_SIZE, 60000);
@@ -300,7 +302,7 @@ class HandleClientConnections implements Runnable{
      * 
      * @param password
      */
-    private void deriveRootKey(String password, String salt) {
+    private static void deriveRootKey(String password, String salt) {
        
             try {
                 SecretKeyFactory skf = SecretKeyFactory.getInstance("SCRYPT");
@@ -315,6 +317,18 @@ class HandleClientConnections implements Runnable{
               }
         }
 
+    /**
+     * Encrypt data using a secret key
+     * @param data
+     * @param key
+     * @return
+     * @throws Exception
+     */
+    public static String encrypt(byte[] data, SecretKey key) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES");
+        cipher.init(Cipher.ENCRYPT_MODE, key);
+        return Base64.getEncoder().encodeToString(cipher.doFinal(data));
+    }
     // Each client that is connected should have its own thread
     @Override
     public void run() {
@@ -331,7 +345,15 @@ class HandleClientConnections implements Runnable{
 
             // Get the ticket request from the client 
             
-            
+            // Derive the root key from password and use username as salt
+            deriveRootKey(password, userName);
+
+            KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+            keyGen.init(256);
+            SecretKey sessionKey = keyGen.generateKey(); // Generate the session key
+
+            // Encrypt the secret key
+            encrypt(sessionKey.getEncoded(), rootKey);
 
         } catch (Exception e) {
             
