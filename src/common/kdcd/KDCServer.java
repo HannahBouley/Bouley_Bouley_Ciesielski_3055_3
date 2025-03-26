@@ -2,10 +2,21 @@ package kdcd;
 
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.security.spec.InvalidKeySpecException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
+
+import org.bouncycastle.crypto.generators.SCrypt;
+import org.bouncycastle.jcajce.spec.ScryptKeySpec;
 
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
@@ -38,7 +49,6 @@ public class KDCServer{
      * */ 
 
     private static final int POOL_SIZE = 10; // MAX NUM OF CONNECTIONS
-    private static final int NONCE_SIZE = 32; // THE SIZE OF THE NONCE FOR THE CACHE
     
     private static int PORT_NUMBER = 5000; // PORT NUMBER THE SERVER IS RUNS ON
     private static String secretsFile = "./test-data/kdc-config/secrets.json"; // FILE THAT HOLDS SECRETS
@@ -63,7 +73,7 @@ public class KDCServer{
             while (true) {
                 Socket socket = serverSocket.accept(); // Accept a new client to the server
 
-                System.out.println("connection recieved");
+                System.out.println("connection recieved from client " + socket.getInetAddress());
                 executor.submit(new HandleClientConnections(socket));
 
                             }
@@ -174,16 +184,20 @@ public class KDCServer{
  * Handles client connections to the server
  */
 class HandleClientConnections implements Runnable{
-                
+    
+    private static final int NONCE_SIZE = 32; // THE SIZE OF THE NONCE FOR THE CACHE
     private Socket socket; // The socket that represents the connection
-    private String userName;
+    private static String userName;
     private static String password;
+    private String salt;
+    private static SecretKey rootKey;
 
     // Create a new nonce cache
-    private static NonceCache nonceCache = new NonceCache(32, 60000);
+    private static NonceCache nonceCache = new NonceCache(NONCE_SIZE, 60000);
 
     HandleClientConnections(Socket socket){
         this.socket = socket;
+        this.salt = null;
     }
 
     /**
@@ -211,12 +225,11 @@ class HandleClientConnections implements Runnable{
 
                     tmpArry = (JSONArray) tmp.getArray("secrets");
 
-                  
+                    // Go through each entry of the array
                     for (int i = 0; i < tmpArry.size(); i++){
                         if(tmpArry.getObject(i).getString("user").equals(userName)){
-                            System.out.println("user found!");
                             password = tmpArry.getObject(i).getString("secret");
-                            System.out.println(password);
+        
                             break;
                         } 
 
@@ -233,16 +246,89 @@ class HandleClientConnections implements Runnable{
         } else {
             throw new InaccessibleObjectException("Expeted JSON object");
         }
-    
+        
+        // Return the nonce as a String
         return Base64.getEncoder().encodeToString(nonce);
     }
 
+    /**
+     * Function that takes as input a String and produces a Base64 encoded hash
+     * @param input
+     * @return
+     * @throws NoSuchAlgorithmException
+     */
     private static String hash(String input) throws NoSuchAlgorithmException {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         byte[] hashBytes = md.digest(input.getBytes());
         return Base64.getEncoder().encodeToString(hashBytes);
     }
 
+
+    /**
+     * Perform the CHAP protocol between the server and client
+     * @param recieve
+     * @param send
+     * @throws Exception
+     */
+    private static void runCHAP(DataInputStream recieve, DataOutputStream send) throws Exception{
+        // Receive the user name and password
+        userName = recieve.readUTF();
+        password = recieve.readUTF();
+
+        System.out.println("\"" + userName +"\"");
+        
+        String challengeString = generateChallenge(userName);
+        //System.out.println(challengeString);
+
+        // Send the challege back to the user
+        send.writeUTF(challengeString);
+        
+        // Get the response hash from the clint
+        String challengeResponse = recieve.readUTF();
+
+        // Server side computed hash
+        String expectedHash = hash(challengeString + password);
+
+        // Check to see if the hash is the same 
+        if (challengeResponse.equals(expectedHash)){
+            send.writeBoolean(true);
+        } else {
+            send.writeBoolean(false);
+        
+        }
+    }
+    /**
+     * Derives the root key from the user's password using username as salt
+     * 
+     * @param password
+     */
+    private static void deriveRootKey(String password, String salt) {
+       
+            try {
+                SecretKeyFactory skf = SecretKeyFactory.getInstance("SCRYPT");
+                ScryptKeySpec spec = new ScryptKeySpec(password.toCharArray(),
+                    Base64.getDecoder().decode(salt), 2048, 8, 1, 128);
+                rootKey = skf.generateSecret(spec);
+
+              } catch (NoSuchAlgorithmException nae) {
+                    nae.printStackTrace();
+              } catch (InvalidKeySpecException kse) {
+                    kse.printStackTrace();
+              }
+        }
+
+    /**
+     * Encrypt data using a secret key
+     * @param data
+     * @param key
+     * @return
+     * @throws Exception
+     */
+    public static String encrypt(byte[] data, SecretKey key) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES");
+        cipher.init(Cipher.ENCRYPT_MODE, key);
+        return Base64.getEncoder().encodeToString(cipher.doFinal(data));
+    }
     // Each client that is connected should have its own thread
     @Override
     public void run() {
@@ -254,33 +340,20 @@ class HandleClientConnections implements Runnable{
             // Send input to the client
             DataOutputStream send = new DataOutputStream(socket.getOutputStream());
             
-            // Receive the user name and password
-            userName = recieve.readUTF();
-            password = recieve.readUTF();
+            // Run the chap protocol
+            runCHAP(recieve, send);
 
-            System.out.println(userName);
-            System.out.println(password);
+            // Get the ticket request from the client 
             
-            String challengeString = generateChallenge(userName);
-            //System.out.println(challengeString);
+            // Derive the root key from password and use username as salt
+            deriveRootKey(password, userName);
 
-            // Send the challege back to the user
-            send.writeUTF(challengeString);
-            
-            // Get the response hash from the clint
-            String challengeResponse = recieve.readUTF();
+            KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+            keyGen.init(256);
+            SecretKey sessionKey = keyGen.generateKey(); // Generate the session key
 
-            // Server side computed hash
-            String expectedHash = hash(challengeString + password);
-
-            // Check to see if the hash is the same 
-            if (challengeResponse.equals(expectedHash)){
-                send.writeUTF("ACCESS GRANTED");
-            } else {
-                send.writeUTF("ACCESS DENIED");
-                System.exit(1);
-            }
-            
+            // Encrypt the secret key
+            encrypt(sessionKey.getEncoded(), rootKey);
 
         } catch (Exception e) {
             
