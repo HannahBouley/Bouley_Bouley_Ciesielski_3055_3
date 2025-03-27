@@ -5,6 +5,8 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.bouncycastle.jcajce.spec.ScryptKeySpec;
 
+import kdcd.KDCServer;
+import kdcd.Ticket;
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
 import merrimackutil.util.Tuple;
@@ -134,14 +136,22 @@ public class KDCClient {
             send.writeUTF(responseHash);
             System.out.println("Sent response hash to KDC.");
 
-            // Receive authentication result.
-            boolean validated = recv.readBoolean();
-            if (!validated) {
+            // Response to user. Either valid or not.
+            boolean valitated = recv.readBoolean();
+            
+            if (valitated){
+                System.out.println("ACCESS GRANTED");
+
+                // Ticket request from client
+                send.writeUTF(service); // Send the service that the client is rquesting
+                //String tikcetData = recv.readUTF(); // The resulting ticket data
+                //System.out.println(tikcetData);
+
+            } else {
                 System.out.println("ACCESS DENIED");
                 System.exit(1);
-            } else {
-                System.out.println("ACCESS GRANTED");
-            }
+        }
+        
 
             // Derive root key using SCRYPT with username as salt.
             SecretKey rootKey = deriveRootKey(password, userName);
@@ -195,6 +205,8 @@ public class KDCClient {
         scanner.close();
         System.out.println("Client terminated.");
     }
+
+
 
     /**
      * Reads the configuration file (hosts file) as text and manually parses the content
@@ -334,3 +346,4 @@ public class KDCClient {
         System.out.println("    -s, --service  The name of the service");
     }
 }
+
