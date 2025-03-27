@@ -4,6 +4,8 @@ import javax.crypto.*;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 
+import kdcd.KDCServer;
+import kdcd.Ticket;
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
 import merrimackutil.util.Tuple;
@@ -79,6 +81,7 @@ public class KDCClient {
         //Clear password from memory
         java.util.Arrays.fill(passwordChars, '\0');
 
+        // Clean up
         scanner.close();
 
         if (args.length < 1){
@@ -125,9 +128,15 @@ public class KDCClient {
             
             if (valitated){
                 System.out.println("ACCESS GRANTED");
+
+                // Ticket request from client
+                send.writeUTF(service); // Send the service that the client is rquesting
+                //String tikcetData = recv.readUTF(); // The resulting ticket data
+                //System.out.println(tikcetData);
+
             } else {
                 System.out.println("ACCESS DENIED");
-                System.exit(1);
+                System.exit(1); // Kick from server
             }
 
            } catch (Exception e) {
@@ -136,6 +145,8 @@ public class KDCClient {
 
         
     }
+
+
 
     //Generate a random salt
     private static byte[] generateSalt() {
