@@ -4,6 +4,7 @@ import javax.crypto.*;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.bouncycastle.jcajce.spec.ScryptKeySpec;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import kdcd.KDCServer;
 import kdcd.Ticket;
@@ -27,6 +28,12 @@ import java.util.Scanner;
 
 public class KDCClient {
 
+    /*
+      * For reference:
+      * 
+      * java -jar dist/kdcclient.jar -h ./test-data/hosts.json -u alice -s echoservice
+      */
+
     // Set via command line.
     private static String configFile = null;  // now using -c for config/hosts file
     private static String userName = null;
@@ -45,6 +52,10 @@ public class KDCClient {
     }
 
     public static void main(String[] args) throws Exception {
+
+        // Add bc provider
+        Security.addProvider(new BouncyCastleProvider());
+
         // Parse command-line inputs.
         if (args.length < 1) {
             printUsage();
@@ -149,7 +160,7 @@ public class KDCClient {
 
             } else {
                 System.out.println("ACCESS DENIED");
-                System.exit(1);
+                System.exit(1); // Kick from server
         }
         
 
