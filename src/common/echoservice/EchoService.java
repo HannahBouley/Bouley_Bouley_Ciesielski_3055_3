@@ -8,6 +8,9 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+
+import kdcd.Ticket;
+
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -142,21 +145,39 @@ public class EchoService {
     }
 
     /**
-     * Validate the ticket and extract the session key.
-     * @param ticket
-     * @return the session key if the ticket is valid, null otherwise
+     * Validates a ticket and extracts the session key.
+     * @param serializedTicket The serialized ticket string.
+     * @return The session key if the ticket is valid, or null if invalid.
      */
-    private static SecretKey validateTicket(String ticket) {
+    private static SecretKey validateTicket(String serializedTicket) {
         try {
-            // Decrypt the ticket using the service secret
-            byte[] decodedTicket = Base64.getDecoder().decode(ticket);
+            // Step 1: Deserialize the ticket
+            Ticket ticket = Ticket.deserialize(serializedTicket);
+
+            // Step 2: Validate the service name
+            if (!ticket.getService().equals(serviceName)) {
+                System.err.println("Invalid service name in ticket");
+                return null;
+            }
+
+            // Step 3: Validate the ticket's timestamp and validity
+            long currentTime = System.currentTimeMillis();
+            long ticketTime = ticket.getTimeStamp();
+            long validityPeriod = Long.parseLong(ticket.getValidityTime());
+            if (currentTime > ticketTime + validityPeriod) {
+                System.err.println("Ticket has expired");
+                return null;
+            }
+
+            // Step 4: Decrypt the session key
+            String encryptedSessionKey = ticket.getEncryptedSessionKey();
             Cipher cipher = Cipher.getInstance("AES");
             SecretKey secretKey = new SecretKeySpec(serviceSecret.getBytes(), "AES");
             cipher.init(Cipher.DECRYPT_MODE, secretKey);
-            byte[] decryptedTicket = cipher.doFinal(decodedTicket);
+            byte[] decryptedSessionKeyBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedSessionKey));
 
-            // Extract the session key from the ticket
-            return new SecretKeySpec(decryptedTicket, "AES");
+            // Step 5: Return the session key
+            return new SecretKeySpec(decryptedSessionKeyBytes, "AES");
         } catch (Exception e) {
             e.printStackTrace();
             return null;
@@ -237,15 +258,15 @@ public class EchoService {
     }
 
     /**
-     * Verify the hash provided by the client.
-     * @param decryptedHash
-     * @return true if the hash is valid, false otherwise
+     * Verifies a decrypted password hash.
+     * @param decryptedHash The decrypted hash to verify.
+     * @return True if the hash matches the expected value, false otherwise.
      */
     public boolean verifyHash(String decryptedHash) {
         try {
             // Compute the expected hash using the service secret
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] expectedHashBytes = md.digest(serviceSecret.getBytes(StandardCharsets.UTF_8));
+            byte[] expectedHashBytes = md.digest(serviceSecret.getBytes());
             String expectedHash = Base64.getEncoder().encodeToString(expectedHashBytes);
 
             // Compare the provided hash with the expected hash
