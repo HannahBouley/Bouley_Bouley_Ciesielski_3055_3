@@ -9,6 +9,8 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
+import merrimackutil.json.JsonIO;
+import merrimackutil.util.NonceCache;
 import merrimackutil.util.Tuple;
 
 import java.nio.charset.StandardCharsets;
@@ -17,9 +19,12 @@ import java.nio.file.Paths;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.util.Base64;
+import java.io.BufferedReader;
 import java.io.Console;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
@@ -41,10 +46,15 @@ public class KDCClient {
     private static String userName = null;
     private static String service = null;
     private static String password = null;
+    private static Ticket ticket = null;
+
 
     // AES/GCM parameters.
     private static final int GCM_TAG_LENGTH = 128; // bits
     private static final int GCM_IV_LENGTH = 12;   // bytes
+
+    // Create a new nonce cache
+    private static NonceCache nonceCache = new NonceCache(32, 60000);
 
     // Simple inner class to hold host entry data.
     private static class HostEntry {
@@ -65,25 +75,23 @@ public class KDCClient {
         } else {
             handleCommandLineInputs(args);
         }
-
-        // Create a scanner for prompting.
-        Scanner scanner = new Scanner(System.in);
+        
 
         // Prompt for missing parameters.
         if (configFile == null) {
             System.out.print("Enter configuration file (hosts file) path: ");
             System.out.flush();
-            configFile = scanner.nextLine();
+           
         }
         if (userName == null) {
             System.out.print("Enter user name: ");
             System.out.flush();
-            userName = scanner.nextLine();
+            
         }
         if (service == null) {
             System.out.print("Enter service name: ");
             System.out.flush();
-            service = scanner.nextLine();
+            
         }
         
         // Prompt for password.
@@ -96,7 +104,7 @@ public class KDCClient {
         } else {
             System.out.print("Enter password: ");
             System.out.flush();
-            passwordChars = scanner.nextLine().toCharArray();
+      
         }
         password = new String(passwordChars);
         System.out.println("Password received.");
@@ -155,8 +163,6 @@ public class KDCClient {
             if (valitated){
                 System.out.println("ACCESS GRANTED");
 
-                
-
             } else {
                 System.out.println("ACCESS DENIED");
                 System.exit(1); // Kick from server
@@ -165,11 +171,10 @@ public class KDCClient {
             // Ticket request from client
             send.writeUTF(service); // Send the service that the client is rquesting
             String ticketData = recv.readUTF(); // The resulting ticket data
-            System.out.println(ticketData);
 
-            Ticket ticket = Ticket.deserialize(ticketData);
+            ticket = Ticket.deserialize(ticketData);
             byte[] iv = ticket.getIv();
-            System.out.println(java.util.Arrays.toString(iv));
+            
 
             
             // Derive root key using SCRYPT with username as salt.
@@ -179,8 +184,7 @@ public class KDCClient {
             String encryptedSessionKey = recv.readUTF();
 
             sessionKey = decryptSessionKey(encryptedSessionKey, iv, rootKey);
-            System.out.println("Decrypted Session Key (Base64): " +
-                   Base64.getEncoder().encodeToString(sessionKey.getEncoded()));
+            
 
             // Clear sensitive data.
             java.util.Arrays.fill(passwordChars, '\0');
@@ -198,31 +202,43 @@ public class KDCClient {
 
             // Send a handshake
             System.out.println("Performing service handshake...");
-            sendService.writeUTF("HANDSHAKE");
+            sendService.writeUTF(ticket.serialize());
+            sendService.writeUTF(nonceCache.getNonce().toString());
+
+            /*
             String handshakeResponse = recvService.readUTF();
             if (!"HANDSHAKE_ACK".equals(handshakeResponse)) {
                 System.out.println("Service handshake failed.");
                 System.exit(1);
             }
+            */
+
+            // recieve nonce, service name, iv and enccryption of Nc
+            //recvService.readUTF();
+
             System.out.println("Service handshake successful.");
+        
 
             // Communication Phase: allow the user to type messages to be echoed back.
             System.out.println("Enter messages to send to the service (type 'exit' to quit):");
-            while (true) {
-                System.out.print("> ");
-                String msg = scanner.nextLine();
-                if ("exit".equalsIgnoreCase(msg.trim())) {
-                    break;
-                }
-                sendService.writeUTF(msg);
+            BufferedReader userInput = new BufferedReader(new InputStreamReader(System.in));
+            boolean exit = false;
+            String lineIn;
+            
+            while((lineIn = userInput.readLine()) != null){
+                lineIn = userInput.readLine();
+                
+                sendService.writeUTF(lineIn);
                 String echo = recvService.readUTF();
                 System.out.println("Service responded: " + echo);
             }
+                
+            
         } catch (Exception e) {
             e.printStackTrace();
         }
         
-        scanner.close();
+    
         System.out.println("Client terminated.");
     }
 

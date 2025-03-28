@@ -1,15 +1,17 @@
 package echoservice;
 
+import merrimackutil.cli.LongOption;
+import merrimackutil.cli.OptionParser;
 import merrimackutil.json.JsonIO;
 import merrimackutil.json.types.JSONObject;
 import merrimackutil.util.NonceCache;
+import merrimackutil.util.Tuple;
 
 import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-
-import kdcd.Ticket;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -19,6 +21,10 @@ import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+/*
+ * java -jar dist/echoservice.jar -c ./test-data/service-config/config.json
+ */
 
 /**
  * An echo service that communicates with clients over a secure channel.
@@ -39,7 +45,7 @@ public class EchoService {
      */
     public static void main(String[] args) {
         try {
-            loadConfig();
+            handleCommandLineInput(args);
 
             nonceCache = new NonceCache(32, 60000);
 
@@ -50,11 +56,76 @@ public class EchoService {
 
             while (true) {
                 Socket clientSocket = serverSocket.accept();
+
+                System.out.println("Recieved connection from " + clientSocket.getInetAddress());
                 threadPool.execute(() -> handleClient(clientSocket));
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+     /**
+     * Handles inputs from the command line
+     */
+    private static void handleCommandLineInput(String[] args){
+        
+        OptionParser optParser = new OptionParser(args);
+        Tuple<Character, String> currOpt;
+
+        // Set up the option parser
+        optParser.setOptString("hc:"); // Only need two commands
+
+        LongOption[] longOpts = new LongOption[2];
+
+        longOpts[0] = new LongOption("help", false, 'h'); // Help command
+        longOpts[1] = new LongOption("config", true, 'c'); // Congigure a file
+
+        optParser.setLongOpts(longOpts);
+
+        while(optParser.getOptIdx() != args.length){
+            currOpt = optParser.getLongOpt(false);
+
+            switch (currOpt.getFirst()) {
+                case 'h': // Simply display the help menu
+                    System.out.println("usage:");
+                    System.out.println("    kdcd");
+                    System.out.println("    kdcd --config <configfile>");
+                    System.out.println("    kdcd --help");
+                    System.out.println("options:");
+                    System.out.println("    -c, --config Set the config file.");
+                    System.out.println("    -h, --help Display the help.");
+
+                    // Exit since only the menu was displayed
+                    System.exit(1);
+                    break;
+
+                case 'c': // Configure w/ file, start the server
+                    System.out.println("Configuring file...");
+
+                    try {
+                        
+                        // Configure using the file path
+                        loadConfig();
+
+                    } catch (Exception e) {
+                        
+                        e.printStackTrace();
+                    }
+
+                    break;
+
+
+                case '?': // Finished with commands
+                    System.exit(1);
+                    break;
+            
+                default:
+                    System.exit(1);
+                    break;
+            }
+        }
+        
     }
 
     /**
@@ -85,7 +156,10 @@ public class EchoService {
 
             // Step 1: Handshake Phase
             String ticket = input.readUTF();
+            System.out.println(ticket);
+
             String clientNonce = input.readUTF();
+            System.out.println(clientNonce);
 
             // Validate ticket and extract session key
             SecretKey sessionKey = validateTicket(ticket);
@@ -94,35 +168,44 @@ public class EchoService {
                 return;
             }
 
-            String serviceNonce = generateNonce();
+            String serviceNonce = nonceCache.getNonce().toString();
             byte[] iv = generateIV();
 
             String encryptedClientNonce = encrypt(clientNonce, sessionKey, iv);
 
             // Send handshake response
-            output.writeUTF(serviceName);
-            output.writeUTF(serviceNonce);
-            output.writeUTF(Base64.getEncoder().encodeToString(iv));
-            output.writeUTF(encryptedClientNonce);
+            //output.writeUTF(serviceName);
+            //output.writeUTF(serviceNonce);
+            //output.writeUTF(Base64.getEncoder().encodeToString(iv));
+            //output.writeUTF(encryptedClientNonce);
 
             // Await and validate client's handshake completion
-            String clientResponse = input.readUTF();
+            
+            /* 
             if (!validateClientResponse(clientResponse, serviceNonce, sessionKey, iv)) {
                 output.writeUTF("Handshake failed");
                 return;
             }
+            */
+
 
             // Step 2: Communication Phase
-            while (true) {
-                String encryptedMessage = input.readUTF();
-                String decryptedMessage = decrypt(encryptedMessage, sessionKey, iv);
+            while(true){
 
-                String transformedMessage = decryptedMessage.toUpperCase();
+                String receivedText = input.readUTF();
+                System.out.println(receivedText);
 
-                String encryptedResponse = encrypt(transformedMessage, sessionKey, iv);
+                
+
+                //String decryptedMessage = decrypt(receivedText, sessionKey, iv);
+
+                String transformedMessage = receivedText.toUpperCase();
+
+                //String encryptedResponse = encrypt(transformedMessage, sessionKey, iv);
 
                 // Send the encrypted response
-                output.writeUTF(encryptedResponse);
+                output.writeUTF(transformedMessage);
+
             }
 
         } catch (Exception e) {
@@ -158,27 +241,26 @@ public class EchoService {
                 return null;
             }
 
+            KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+            keyGen.init(256);
+            return keyGen.generateKey(); 
+
+            /* 
             String encryptedSessionKey = ticket.getEncryptedSessionKey();
-            Cipher cipher = Cipher.getInstance("AES");
-            SecretKey secretKey = new SecretKeySpec(serviceSecret.getBytes(), "AES");
-            cipher.init(Cipher.DECRYPT_MODE, secretKey);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NOPADDING");
+
+            GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, ticket.getIv());
+            SecretKey secretKey = new SecretKeySpec(ticket.getEncryptedSessionKey().getBytes(), "AES");
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec);
+
             byte[] decryptedSessionKeyBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedSessionKey));
 
             return new SecretKeySpec(decryptedSessionKeyBytes, "AES");
+            */
         } catch (Exception e) {
             e.printStackTrace();
             return null;
         }
-    }
-
-    /**
-     * Generate a fresh nonce.
-     * @return a fresh nonce
-     */
-    private static String generateNonce() {
-        byte[] nonce = new byte[16];
-        new java.security.SecureRandom().nextBytes(nonce);
-        return Base64.getEncoder().encodeToString(nonce);
     }
 
     /**

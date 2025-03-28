@@ -386,7 +386,7 @@ class HandleClientConnections implements Runnable{
             // Encrypt the session key using the root key
             deriveRootKey(password, userName);
            
-            SecretKey sessionKeyObj = generateSessionKey();  // Get the SecretKey
+            SecretKey sessionKeyObj = generateSessionKey();  // Get the session key
             byte[] iv = new byte[12];
             new SecureRandom().nextBytes(iv); // This will generate a random IV
             String encryptedSessionKey = encrypt(sessionKeyObj.getEncoded(), rootKey, iv);
@@ -396,7 +396,8 @@ class HandleClientConnections implements Runnable{
             send.writeUTF(ticket.serialize());
             send.writeUTF(encryptedSessionKey);
         
-            
+            // Terminate the connection
+            socket.close();
 
         } catch (Exception e) {
             
