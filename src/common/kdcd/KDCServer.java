@@ -195,14 +195,13 @@ public class KDCServer{
  */
 class HandleClientConnections implements Runnable{
     
-    private static final int NONCE_SIZE = 32; // THE SIZE OF THE NONCE FOR THE CACHE
+    private static final int NONCE_SIZE = 32; //The size of the nonce
     private Socket socket; // The socket that represents the connection
     private static String userName;
     private static String password;
     private String service;
     private byte[] IV;
     private static SecretKey rootKey;
-    private static String sessionKey;
     private static String sessionKey;
 
     // Create a new nonce cache
@@ -354,7 +353,7 @@ class HandleClientConnections implements Runnable{
         byte[] IV = new byte[12];
         new SecureRandom().nextBytes(IV);
         
-        // Copy the IV into ivOut (which should be a preallocated byte array of length 12)
+        // Copy the IV into ivOut 
         System.arraycopy(IV, 0, ivOut, 0, IV.length);
         
         cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key.getEncoded(), "AES"), new GCMParameterSpec(128, IV));
@@ -378,16 +377,12 @@ class HandleClientConnections implements Runnable{
             DataOutputStream send = new DataOutputStream(socket.getOutputStream());
             
             // Run the CHAP protocol
-            // Run the CHAP protocol
             runCHAP(recieve, send);
             
             // Get the ticket request from the client which is the service and username
             service = recieve.readUTF();
             
-            // Get the ticket request from the client which is the service and username
-            service = recieve.readUTF();
             
-            // Encrypt the session key using the root key
             // Encrypt the session key using the root key
             deriveRootKey(password, userName);
            

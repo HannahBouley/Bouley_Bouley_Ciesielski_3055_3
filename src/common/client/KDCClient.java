@@ -283,7 +283,7 @@ public class KDCClient {
      */
     private static SecretKey deriveRootKey(String password, String username) throws NoSuchAlgorithmException, InvalidKeySpecException {
         byte[] salt = Base64.getEncoder().encode(username.getBytes(StandardCharsets.UTF_8));
-        // Parameters: N=2048, r=8, p=1, key length=128 bits.
+      
         ScryptKeySpec spec = new ScryptKeySpec(password.toCharArray(), salt, 2048, 8, 1, 128);
         SecretKeyFactory skf = SecretKeyFactory.getInstance("SCRYPT");
         return skf.generateSecret(spec);
@@ -291,7 +291,6 @@ public class KDCClient {
 
     /**
      * Decrypts an encrypted session key using AES/GCM/NoPadding.
-     * The input format is assumed to be "iv:ciphertext" (both Base64 encoded).
      */
     private static SecretKey decryptSessionKey(String encryptedData, byte[] iv, SecretKey rootKey) throws Exception {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
@@ -325,7 +324,6 @@ public class KDCClient {
     private static void handleCommandLineInputs(String[] args) {
         OptionParser optParser = new OptionParser(args);
         Tuple<Character, String> currOpt;
-        // Added 'c' for config file.
         optParser.setOptString("c:h:u:s:");
 
         LongOption[] longOpts = new LongOption[4];
