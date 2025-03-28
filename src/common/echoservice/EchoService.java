@@ -8,6 +8,9 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+
+import kdcd.Ticket;
+
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -21,7 +24,7 @@ import java.util.concurrent.Executors;
  * An echo service that communicates with clients over a secure channel.
  */
 public class EchoService {
-    private static final String CONFIG_PATH = "src/test-data/service-config/config.json";
+    private static final String CONFIG_PATH = "test-data/service-config/config.json";
     private static int port;
     private static String serviceName;
     private static String serviceSecret;
@@ -36,19 +39,15 @@ public class EchoService {
      */
     public static void main(String[] args) {
         try {
-            // Step 1: Load configuration
             loadConfig();
 
-            // Step 2: Initialize NonceCache
             nonceCache = new NonceCache(32, 60000);
 
-            // Step 3: Set up server socket and thread pool
             ServerSocket serverSocket = new ServerSocket(port);
             ExecutorService threadPool = Executors.newFixedThreadPool(10);
 
             System.out.println("EchoService started on port " + port);
 
-            // Step 4: Infinite loop to accept connections
             while (true) {
                 Socket clientSocket = serverSocket.accept();
                 threadPool.execute(() -> handleClient(clientSocket));
@@ -95,11 +94,9 @@ public class EchoService {
                 return;
             }
 
-            // Generate a fresh nonce and IV
             String serviceNonce = generateNonce();
             byte[] iv = generateIV();
 
-            // Encrypt the client's nonce
             String encryptedClientNonce = encrypt(clientNonce, sessionKey, iv);
 
             // Send handshake response
@@ -120,10 +117,8 @@ public class EchoService {
                 String encryptedMessage = input.readUTF();
                 String decryptedMessage = decrypt(encryptedMessage, sessionKey, iv);
 
-                // Transform message to uppercase
                 String transformedMessage = decryptedMessage.toUpperCase();
 
-                // Encrypt the transformed message
                 String encryptedResponse = encrypt(transformedMessage, sessionKey, iv);
 
                 // Send the encrypted response
@@ -142,21 +137,34 @@ public class EchoService {
     }
 
     /**
-     * Validate the ticket and extract the session key.
-     * @param ticket
-     * @return the session key if the ticket is valid, null otherwise
+     * Validates a ticket and extracts the session key.
+     * @param serializedTicket The serialized ticket string.
+     * @return The session key if the ticket is valid, or null if invalid.
      */
-    private static SecretKey validateTicket(String ticket) {
+    private static SecretKey validateTicket(String serializedTicket) {
         try {
-            // Decrypt the ticket using the service secret
-            byte[] decodedTicket = Base64.getDecoder().decode(ticket);
+            Ticket ticket = Ticket.deserialize(serializedTicket);
+
+            if (!ticket.getService().equals(serviceName)) {
+                System.err.println("Invalid service name in ticket");
+                return null;
+            }
+
+            long currentTime = System.currentTimeMillis();
+            long ticketTime = ticket.getTimeStamp();
+            long validityPeriod = Long.parseLong(ticket.getValidityTime());
+            if (currentTime > ticketTime + validityPeriod) {
+                System.err.println("Ticket has expired");
+                return null;
+            }
+
+            String encryptedSessionKey = ticket.getEncryptedSessionKey();
             Cipher cipher = Cipher.getInstance("AES");
             SecretKey secretKey = new SecretKeySpec(serviceSecret.getBytes(), "AES");
             cipher.init(Cipher.DECRYPT_MODE, secretKey);
-            byte[] decryptedTicket = cipher.doFinal(decodedTicket);
+            byte[] decryptedSessionKeyBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedSessionKey));
 
-            // Extract the session key from the ticket
-            return new SecretKeySpec(decryptedTicket, "AES");
+            return new SecretKeySpec(decryptedSessionKeyBytes, "AES");
         } catch (Exception e) {
             e.printStackTrace();
             return null;
@@ -225,10 +233,8 @@ public class EchoService {
      */
     private static boolean validateClientResponse(String response, String expectedNonce, SecretKey sessionKey, byte[] iv) {
         try {
-            // Decrypt the client's response
             String decryptedResponse = decrypt(response, sessionKey, iv);
     
-            // Check if the decrypted response contains the expected nonce
             return decryptedResponse.equals(expectedNonce);
         } catch (Exception e) {
             e.printStackTrace();
@@ -237,18 +243,17 @@ public class EchoService {
     }
 
     /**
-     * Verify the hash provided by the client.
-     * @param decryptedHash
-     * @return true if the hash is valid, false otherwise
+     * Verifies a decrypted password hash.
+     * @param decryptedHash The decrypted hash to verify.
+     * @return True if the hash matches the expected value, false otherwise.
      */
     public boolean verifyHash(String decryptedHash) {
         try {
             // Compute the expected hash using the service secret
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] expectedHashBytes = md.digest(serviceSecret.getBytes(StandardCharsets.UTF_8));
+            byte[] expectedHashBytes = md.digest(serviceSecret.getBytes());
             String expectedHash = Base64.getEncoder().encodeToString(expectedHashBytes);
 
-            // Compare the provided hash with the expected hash
             return decryptedHash.equals(expectedHash);
         } catch (Exception e) {
             e.printStackTrace();

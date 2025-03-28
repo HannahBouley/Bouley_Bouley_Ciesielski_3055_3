@@ -5,6 +5,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.bouncycastle.jcajce.spec.ScryptKeySpec;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
@@ -23,6 +24,8 @@ import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
+
+
 
 
 public class KDCClient {
@@ -98,7 +101,7 @@ public class KDCClient {
         password = new String(passwordChars);
         System.out.println("Password received.");
 
-        // Read configuration (hosts) file.
+        // Read configuration file.
         Map<String, HostEntry> hostsMap = new HashMap<>();
         try {
             hostsMap = readHostsFile(configFile);
@@ -108,7 +111,7 @@ public class KDCClient {
             System.exit(1);
         }
 
-        // Get KDC host (should be under key "kdcd").
+        // Get KDC host 
         HostEntry kdcHost = hostsMap.get("kdcd");
         if (kdcHost == null) {
             System.err.println("Config file does not contain a 'kdcd' entry.");
@@ -121,7 +124,7 @@ public class KDCClient {
             System.exit(1);
         }
 
-        // --- CHAP Authentication and Session Key Exchange with KDC ---
+        // CHAP Authentication and Session Key Exchange with KDC 
         SecretKey sessionKey = null;
         System.out.println("Attempting to connect to KDC at " + kdcHost.address + ":" + kdcHost.port);
         try (Socket kdcSocket = new Socket(kdcHost.address, kdcHost.port)) {
@@ -164,10 +167,10 @@ public class KDCClient {
             String ticketData = recv.readUTF(); // The resulting ticket data
             System.out.println(ticketData);
 
-            // Deserialize the ticket data
             Ticket ticket = Ticket.deserialize(ticketData);
-            byte[] iv = Base64.getDecoder().decode(ticket.getIv());
-            System.out.println(iv);
+            byte[] iv = ticket.getIv();
+            System.out.println(java.util.Arrays.toString(iv));
+
             
             // Derive root key using SCRYPT with username as salt.
             SecretKey rootKey = deriveRootKey(password, userName);
@@ -186,14 +189,14 @@ public class KDCClient {
             System.exit(1);
         }
 
-        // --- Service Communication Protocol ---
+        // Service Communication Protocol 
         System.out.println("Attempting to connect to service at " + serviceHost.address + ":" + serviceHost.port);
         try (Socket serviceSocket = new Socket(serviceHost.address, serviceHost.port)) {
             System.out.println("Connected to service.");
             DataInputStream recvService = new DataInputStream(serviceSocket.getInputStream());
             DataOutputStream sendService = new DataOutputStream(serviceSocket.getOutputStream());
 
-            // Example handshake: send a handshake token.
+            // Send a handshake
             System.out.println("Performing service handshake...");
             sendService.writeUTF("HANDSHAKE");
             String handshakeResponse = recvService.readUTF();
@@ -227,7 +230,7 @@ public class KDCClient {
 
     /**
      * Reads the configuration file (hosts file) as text and manually parses the content
-     * to create a map from host-name to HostEntry. Assumes a strict JSON format with minimal whitespace.
+     * to create a map from host-name to HostEntry. 
      */
     private static Map<String, HostEntry> readHostsFile(String fileName) throws Exception {
         Map<String, HostEntry> hosts = new HashMap<>();
@@ -280,7 +283,7 @@ public class KDCClient {
      */
     private static SecretKey deriveRootKey(String password, String username) throws NoSuchAlgorithmException, InvalidKeySpecException {
         byte[] salt = Base64.getEncoder().encode(username.getBytes(StandardCharsets.UTF_8));
-        // Parameters: N=2048, r=8, p=1, key length=128 bits.
+      
         ScryptKeySpec spec = new ScryptKeySpec(password.toCharArray(), salt, 2048, 8, 1, 128);
         SecretKeyFactory skf = SecretKeyFactory.getInstance("SCRYPT");
         return skf.generateSecret(spec);
@@ -288,16 +291,23 @@ public class KDCClient {
 
     /**
      * Decrypts an encrypted session key using AES/GCM/NoPadding.
-     * The input format is assumed to be "iv:ciphertext" (both Base64 encoded).
      */
     private static SecretKey decryptSessionKey(String encryptedData, byte[] iv, SecretKey rootKey) throws Exception {
-        
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
         cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(rootKey.getEncoded(), "AES"), gcmSpec);
-        byte[] sessionKeyBytes = cipher.doFinal(encryptedData.getBytes());
+    
+        // Assume encryptedData is just the Base64 encoded ciphertext
+        byte[] cipherBytes = Base64.getDecoder().decode(encryptedData);
+    
+        // Decrypt the session key using the cipher
+        byte[] sessionKeyBytes = cipher.doFinal(cipherBytes);
+    
         return new SecretKeySpec(sessionKeyBytes, "AES");
     }
+    
+    
+    
 
     /**
      * Computes a SHA-256 hash of the input and returns the result as a Base64 encoded string.
@@ -314,7 +324,6 @@ public class KDCClient {
     private static void handleCommandLineInputs(String[] args) {
         OptionParser optParser = new OptionParser(args);
         Tuple<Character, String> currOpt;
-        // Added 'c' for config file.
         optParser.setOptString("c:h:u:s:");
 
         LongOption[] longOpts = new LongOption[4];
