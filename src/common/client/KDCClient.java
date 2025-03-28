@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
 
+
 public class KDCClient {
 
     /*
@@ -153,25 +154,31 @@ public class KDCClient {
             if (valitated){
                 System.out.println("ACCESS GRANTED");
 
-                // Ticket request from client
-                send.writeUTF(service); // Send the service that the client is rquesting
-                //String tikcetData = recv.readUTF(); // The resulting ticket data
-                //System.out.println(tikcetData);
+                
 
             } else {
                 System.out.println("ACCESS DENIED");
                 System.exit(1); // Kick from server
         }
         
+            // Ticket request from client
+            send.writeUTF(service); // Send the service that the client is rquesting
+            String ticketData = recv.readUTF(); // The resulting ticket data
+            System.out.println(ticketData);
 
+            // Deserialize the ticket data
+            Ticket ticket = Ticket.deserialize(ticketData);
+            byte[] iv = ticket.getIv();
+            
             // Derive root key using SCRYPT with username as salt.
             SecretKey rootKey = deriveRootKey(password, userName);
 
             // Receive encrypted session key from the KDC.
             String encryptedSessionKey = recv.readUTF();
-            sessionKey = decryptSessionKey(encryptedSessionKey, rootKey);
+
+            sessionKey = decryptSessionKey(encryptedSessionKey, iv, rootKey);
             System.out.println("Decrypted Session Key (Base64): " +
-                    Base64.getEncoder().encodeToString(sessionKey.getEncoded()));
+                   Base64.getEncoder().encodeToString(sessionKey.getEncoded()));
 
             // Clear sensitive data.
             java.util.Arrays.fill(passwordChars, '\0');
@@ -284,18 +291,12 @@ public class KDCClient {
      * Decrypts an encrypted session key using AES/GCM/NoPadding.
      * The input format is assumed to be "iv:ciphertext" (both Base64 encoded).
      */
-    private static SecretKey decryptSessionKey(String encryptedData, SecretKey rootKey) throws Exception {
-        String[] parts = encryptedData.split(":");
-        if (parts.length != 2) {
-            throw new IllegalArgumentException("Invalid encrypted session key format.");
-        }
-        byte[] iv = Base64.getDecoder().decode(parts[0]);
-        byte[] ciphertext = Base64.getDecoder().decode(parts[1]);
-
+    private static SecretKey decryptSessionKey(String encryptedData, byte[] iv, SecretKey rootKey) throws Exception {
+        
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
         cipher.init(Cipher.DECRYPT_MODE, rootKey, gcmSpec);
-        byte[] sessionKeyBytes = cipher.doFinal(ciphertext);
+        byte[] sessionKeyBytes = cipher.doFinal(encryptedData.getBytes());
         return new SecretKeySpec(sessionKeyBytes, "AES");
     }
 

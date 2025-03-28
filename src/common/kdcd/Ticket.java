@@ -1,5 +1,4 @@
 package kdcd;
-
 /**
  * Class that represents a ticket
  */
@@ -8,18 +7,18 @@ public class Ticket {
     private final String encryptedSessionKey;
     private final String clientUsername;
     private final String serviceName;
-    private final byte[] IV;
+    private final String IV;
     private final long timeStamp;
     private final String validityTime;
 
-    Ticket(String encryptedSessionKey, String clientUSername, String serviceName, byte[] Iv, String validityTime, long timeStamp){
+    public Ticket(String encryptedSessionKey, String clientUSername, String serviceName, byte[] Iv, String validityTime, long timeStamp){
         this.encryptedSessionKey = encryptedSessionKey;
         this.clientUsername = clientUSername;
         this.serviceName = serviceName;
-        this.IV = Iv;
+        this.IV = Iv.toString();
         this.timeStamp = timeStamp;
         this.validityTime =validityTime;
-
+    
     }
 
     /**
@@ -31,11 +30,43 @@ public class Ticket {
     }
 
     /**
-     * Get the ticket data
+     * Gets the client's user name
      * @return
      */
-    public String getTicketData(){
-        return clientUsername + ":" + serviceName + ":"  + timeStamp;
+    public String getClientUserName(){
+        return clientUsername;
+    }
+
+    /**
+     * Get the service
+     * @return
+     */
+    public String getService(){
+        return serviceName;
+    }
+
+    /**
+     * Get the iv used
+     * @return
+     */
+    public byte[] getIv(){
+        return IV.getBytes();
+    }
+
+    /**
+     * Get the validity time
+     * @return
+     */
+    public String getValidityTime(){
+        return validityTime;
+    }
+
+    /**
+     * Get the time stamp
+     * @return
+     */
+    public long getTimeStamp(){
+        return timeStamp;
     }
 
     /**

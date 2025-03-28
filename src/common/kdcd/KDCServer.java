@@ -15,6 +15,8 @@ import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.bouncycastle.crypto.generators.SCrypt;
 import org.bouncycastle.jcajce.spec.ScryptKeySpec;
@@ -37,7 +39,6 @@ import java.net.*;
 import java.util.Base64;
 import java.util.Scanner;
 import java.util.concurrent.*;
-
 
 /**
  * The server in which the client will connect to
@@ -192,7 +193,6 @@ class HandleClientConnections implements Runnable{
     private Socket socket; // The socket that represents the connection
     private static String userName;
     private static String password;
-    private String salt;
     private String service;
     private static byte[] IV;
     private static SecretKey rootKey;
@@ -203,7 +203,7 @@ class HandleClientConnections implements Runnable{
 
     HandleClientConnections(Socket socket){
         this.socket = socket;
-        this.salt = null;
+       
     }
 
     /**
@@ -344,9 +344,15 @@ class HandleClientConnections implements Runnable{
      * @throws Exception
      */
     public static String encrypt(byte[] data, SecretKey key) throws Exception {
-        Cipher cipher = Cipher.getInstance("AES");
-        cipher.init(Cipher.ENCRYPT_MODE, key);
-        IV = cipher.getIV();
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        
+        // Create a new iv
+        IV = new byte[12];
+        new SecureRandom().nextBytes(IV);
+
+        cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key.getEncoded(), "AES"), new GCMParameterSpec(128, IV));
+        
+        // Return the encryped key
         return Base64.getEncoder().encodeToString(cipher.doFinal(data));
     }
     // Each client that is connected should have its own thread
@@ -368,13 +374,13 @@ class HandleClientConnections implements Runnable{
             
             // Encrypt the session key using the root key
             deriveRootKey(password, userName);
-           // sessionKey = generateSessionKey();
-            //String encryptedSessionkey = encrypt(sessionKey.getBytes(), rootKey);
-            //Ticket ticket = new Ticket(encryptedSessionkey, userName, service, IV, "60000", System.currentTimeMillis()); // Create a new ticket
-            
-            //System.out.println(ticket.serialize());
+            sessionKey = generateSessionKey();
+            String encryptedSessionkey = encrypt(sessionKey.getBytes(), rootKey);
+            Ticket ticket = new Ticket(encryptedSessionkey, userName, service, IV, "60000", System.currentTimeMillis()); // Create a new ticket
+
             //Send ticket data back to the client
-            //send.writeUTF(ticket.serialize());
+            send.writeUTF(ticket.serialize());
+            send.writeUTF(encryptedSessionkey);
             
 
         } catch (Exception e) {
