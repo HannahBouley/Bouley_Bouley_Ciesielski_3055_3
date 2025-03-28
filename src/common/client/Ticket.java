@@ -1,4 +1,4 @@
-package kdcd;
+package client;
 
 import java.util.Base64;
 
@@ -77,7 +77,7 @@ public class Ticket {
      * @return
      */
     public String serialize(){
-        return encryptedSessionKey + "," + clientUsername + "," + serviceName + "," + IV + "," + validityTime + "," + String.valueOf(timeStamp);
+        return encryptedSessionKey + "," + clientUsername + "," + serviceName + "," + Base64.getEncoder().encodeToString(IV) + "," + validityTime + "," + String.valueOf(timeStamp);
     }
 
     /**

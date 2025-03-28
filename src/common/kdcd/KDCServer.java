@@ -284,7 +284,6 @@ class HandleClientConnections implements Runnable{
         System.out.println("\"" + userName +"\"");
         
         String challengeString = generateChallenge(userName);
-        //System.out.println(challengeString);
 
         // Send the challege back to the user
         send.writeUTF(challengeString);

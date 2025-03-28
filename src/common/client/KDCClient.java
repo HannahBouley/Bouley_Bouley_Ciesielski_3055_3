@@ -6,8 +6,6 @@ import javax.crypto.spec.SecretKeySpec;
 import org.bouncycastle.jcajce.spec.ScryptKeySpec;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import kdcd.KDCServer;
-import kdcd.Ticket;
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
 import merrimackutil.util.Tuple;
@@ -168,7 +166,8 @@ public class KDCClient {
 
             // Deserialize the ticket data
             Ticket ticket = Ticket.deserialize(ticketData);
-            byte[] iv = ticket.getIv();
+            byte[] iv = Base64.getDecoder().decode(ticket.getIv());
+            System.out.println(iv);
             
             // Derive root key using SCRYPT with username as salt.
             SecretKey rootKey = deriveRootKey(password, userName);
@@ -295,7 +294,7 @@ public class KDCClient {
         
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
-        cipher.init(Cipher.DECRYPT_MODE, rootKey, gcmSpec);
+        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(rootKey.getEncoded(), "AES"), gcmSpec);
         byte[] sessionKeyBytes = cipher.doFinal(encryptedData.getBytes());
         return new SecretKeySpec(sessionKeyBytes, "AES");
     }
