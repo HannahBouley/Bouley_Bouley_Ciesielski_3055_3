@@ -24,7 +24,7 @@ import java.util.concurrent.Executors;
  * An echo service that communicates with clients over a secure channel.
  */
 public class EchoService {
-    private static final String CONFIG_PATH = "src/test-data/service-config/config.json";
+    private static final String CONFIG_PATH = "test-data/service-config/config.json";
     private static int port;
     private static String serviceName;
     private static String serviceSecret;
@@ -39,19 +39,15 @@ public class EchoService {
      */
     public static void main(String[] args) {
         try {
-            // Step 1: Load configuration
             loadConfig();
 
-            // Step 2: Initialize NonceCache
             nonceCache = new NonceCache(32, 60000);
 
-            // Step 3: Set up server socket and thread pool
             ServerSocket serverSocket = new ServerSocket(port);
             ExecutorService threadPool = Executors.newFixedThreadPool(10);
 
             System.out.println("EchoService started on port " + port);
 
-            // Step 4: Infinite loop to accept connections
             while (true) {
                 Socket clientSocket = serverSocket.accept();
                 threadPool.execute(() -> handleClient(clientSocket));
@@ -98,11 +94,9 @@ public class EchoService {
                 return;
             }
 
-            // Generate a fresh nonce and IV
             String serviceNonce = generateNonce();
             byte[] iv = generateIV();
 
-            // Encrypt the client's nonce
             String encryptedClientNonce = encrypt(clientNonce, sessionKey, iv);
 
             // Send handshake response
@@ -123,10 +117,8 @@ public class EchoService {
                 String encryptedMessage = input.readUTF();
                 String decryptedMessage = decrypt(encryptedMessage, sessionKey, iv);
 
-                // Transform message to uppercase
                 String transformedMessage = decryptedMessage.toUpperCase();
 
-                // Encrypt the transformed message
                 String encryptedResponse = encrypt(transformedMessage, sessionKey, iv);
 
                 // Send the encrypted response
@@ -151,16 +143,13 @@ public class EchoService {
      */
     private static SecretKey validateTicket(String serializedTicket) {
         try {
-            // Step 1: Deserialize the ticket
             Ticket ticket = Ticket.deserialize(serializedTicket);
 
-            // Step 2: Validate the service name
             if (!ticket.getService().equals(serviceName)) {
                 System.err.println("Invalid service name in ticket");
                 return null;
             }
 
-            // Step 3: Validate the ticket's timestamp and validity
             long currentTime = System.currentTimeMillis();
             long ticketTime = ticket.getTimeStamp();
             long validityPeriod = Long.parseLong(ticket.getValidityTime());
@@ -169,14 +158,12 @@ public class EchoService {
                 return null;
             }
 
-            // Step 4: Decrypt the session key
             String encryptedSessionKey = ticket.getEncryptedSessionKey();
             Cipher cipher = Cipher.getInstance("AES");
             SecretKey secretKey = new SecretKeySpec(serviceSecret.getBytes(), "AES");
             cipher.init(Cipher.DECRYPT_MODE, secretKey);
             byte[] decryptedSessionKeyBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedSessionKey));
 
-            // Step 5: Return the session key
             return new SecretKeySpec(decryptedSessionKeyBytes, "AES");
         } catch (Exception e) {
             e.printStackTrace();
@@ -246,10 +233,8 @@ public class EchoService {
      */
     private static boolean validateClientResponse(String response, String expectedNonce, SecretKey sessionKey, byte[] iv) {
         try {
-            // Decrypt the client's response
             String decryptedResponse = decrypt(response, sessionKey, iv);
     
-            // Check if the decrypted response contains the expected nonce
             return decryptedResponse.equals(expectedNonce);
         } catch (Exception e) {
             e.printStackTrace();
@@ -269,7 +254,6 @@ public class EchoService {
             byte[] expectedHashBytes = md.digest(serviceSecret.getBytes());
             String expectedHash = Base64.getEncoder().encodeToString(expectedHashBytes);
 
-            // Compare the provided hash with the expected hash
             return decryptedHash.equals(expectedHash);
         } catch (Exception e) {
             e.printStackTrace();
