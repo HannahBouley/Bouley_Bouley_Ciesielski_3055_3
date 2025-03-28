@@ -4,6 +4,7 @@ import javax.crypto.*;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.bouncycastle.jcajce.spec.ScryptKeySpec;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
@@ -23,7 +24,14 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
 
+
 public class KDCClient {
+
+    /*
+      * For reference:
+      * 
+      * java -jar dist/kdcclient.jar -h ./test-data/hosts.json -u alice -s echoservice
+      */
 
     // Set via command line.
     private static String configFile = null;  // now using -c for config/hosts file
@@ -43,6 +51,10 @@ public class KDCClient {
     }
 
     public static void main(String[] args) throws Exception {
+
+        // Add bc provider
+        Security.addProvider(new BouncyCastleProvider());
+
         // Parse command-line inputs.
         if (args.length < 1) {
             printUsage();
@@ -134,23 +146,38 @@ public class KDCClient {
             send.writeUTF(responseHash);
             System.out.println("Sent response hash to KDC.");
 
-            // Receive authentication result.
-            boolean validated = recv.readBoolean();
-            if (!validated) {
-                System.out.println("ACCESS DENIED");
-                System.exit(1);
-            } else {
+            // Response to user. Either valid or not.
+            boolean valitated = recv.readBoolean();
+            
+            if (valitated){
                 System.out.println("ACCESS GRANTED");
-            }
 
+                
+
+            } else {
+                System.out.println("ACCESS DENIED");
+                System.exit(1); // Kick from server
+        }
+        
+            // Ticket request from client
+            send.writeUTF(service); // Send the service that the client is rquesting
+            String ticketData = recv.readUTF(); // The resulting ticket data
+            System.out.println(ticketData);
+
+            // Deserialize the ticket data
+            Ticket ticket = Ticket.deserialize(ticketData);
+            byte[] iv = Base64.getDecoder().decode(ticket.getIv());
+            System.out.println(iv);
+            
             // Derive root key using SCRYPT with username as salt.
             SecretKey rootKey = deriveRootKey(password, userName);
 
             // Receive encrypted session key from the KDC.
             String encryptedSessionKey = recv.readUTF();
-            sessionKey = decryptSessionKey(encryptedSessionKey, rootKey);
+
+            sessionKey = decryptSessionKey(encryptedSessionKey, iv, rootKey);
             System.out.println("Decrypted Session Key (Base64): " +
-                    Base64.getEncoder().encodeToString(sessionKey.getEncoded()));
+                   Base64.getEncoder().encodeToString(sessionKey.getEncoded()));
 
             // Clear sensitive data.
             java.util.Arrays.fill(passwordChars, '\0');
@@ -195,6 +222,8 @@ public class KDCClient {
         scanner.close();
         System.out.println("Client terminated.");
     }
+
+
 
     /**
      * Reads the configuration file (hosts file) as text and manually parses the content
@@ -261,18 +290,12 @@ public class KDCClient {
      * Decrypts an encrypted session key using AES/GCM/NoPadding.
      * The input format is assumed to be "iv:ciphertext" (both Base64 encoded).
      */
-    private static SecretKey decryptSessionKey(String encryptedData, SecretKey rootKey) throws Exception {
-        String[] parts = encryptedData.split(":");
-        if (parts.length != 2) {
-            throw new IllegalArgumentException("Invalid encrypted session key format.");
-        }
-        byte[] iv = Base64.getDecoder().decode(parts[0]);
-        byte[] ciphertext = Base64.getDecoder().decode(parts[1]);
-
+    private static SecretKey decryptSessionKey(String encryptedData, byte[] iv, SecretKey rootKey) throws Exception {
+        
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
-        cipher.init(Cipher.DECRYPT_MODE, rootKey, gcmSpec);
-        byte[] sessionKeyBytes = cipher.doFinal(ciphertext);
+        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(rootKey.getEncoded(), "AES"), gcmSpec);
+        byte[] sessionKeyBytes = cipher.doFinal(encryptedData.getBytes());
         return new SecretKeySpec(sessionKeyBytes, "AES");
     }
 
@@ -334,3 +357,4 @@ public class KDCClient {
         System.out.println("    -s, --service  The name of the service");
     }
 }
+

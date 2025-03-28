@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.security.Security;
 import java.security.spec.InvalidKeySpecException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -14,9 +15,12 @@ import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.bouncycastle.crypto.generators.SCrypt;
 import org.bouncycastle.jcajce.spec.ScryptKeySpec;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import merrimackutil.cli.LongOption;
 import merrimackutil.cli.OptionParser;
@@ -35,7 +39,6 @@ import java.net.*;
 import java.util.Base64;
 import java.util.Scanner;
 import java.util.concurrent.*;
-
 
 /**
  * The server in which the client will connect to
@@ -57,6 +60,8 @@ public class KDCServer{
 
     // Entry point for the server
     public static void main(String[] args) {
+        // Add bc provider
+        Security.addProvider(new BouncyCastleProvider());
 
         // Read the commands on the command line
         handleCommandLineInput(args);
@@ -179,7 +184,6 @@ public class KDCServer{
     
 }
 
-
 /**
  * Handles client connections to the server
  */
@@ -189,15 +193,17 @@ class HandleClientConnections implements Runnable{
     private Socket socket; // The socket that represents the connection
     private static String userName;
     private static String password;
-    private String salt;
+    private String service;
+    private static byte[] IV;
     private static SecretKey rootKey;
+    private static String sessionKey;
 
     // Create a new nonce cache
     private static NonceCache nonceCache = new NonceCache(NONCE_SIZE, 60000);
 
     HandleClientConnections(Socket socket){
         this.socket = socket;
-        this.salt = null;
+       
     }
 
     /**
@@ -278,7 +284,6 @@ class HandleClientConnections implements Runnable{
         System.out.println("\"" + userName +"\"");
         
         String challengeString = generateChallenge(userName);
-        //System.out.println(challengeString);
 
         // Send the challege back to the user
         send.writeUTF(challengeString);
@@ -307,7 +312,7 @@ class HandleClientConnections implements Runnable{
             try {
                 SecretKeyFactory skf = SecretKeyFactory.getInstance("SCRYPT");
                 ScryptKeySpec spec = new ScryptKeySpec(password.toCharArray(),
-                    Base64.getDecoder().decode(salt), 2048, 8, 1, 128);
+                    salt.getBytes(), 2048, 8, 1, 128);
                 rootKey = skf.generateSecret(spec);
 
               } catch (NoSuchAlgorithmException nae) {
@@ -315,7 +320,20 @@ class HandleClientConnections implements Runnable{
               } catch (InvalidKeySpecException kse) {
                     kse.printStackTrace();
               }
-        }
+    }
+
+    /**
+     * Generates a session key and returns it as a Base64 encoded String
+     * @return
+     * @throws NoSuchAlgorithmException
+     */
+    public static String generateSessionKey() throws NoSuchAlgorithmException{
+
+           KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+           keyGen.init(256);
+           SecretKey sessionKey = keyGen.generateKey(); // Generate the session key
+           return Base64.getEncoder().encodeToString(sessionKey.getEncoded());
+    }
 
     /**
      * Encrypt data using a secret key
@@ -325,8 +343,15 @@ class HandleClientConnections implements Runnable{
      * @throws Exception
      */
     public static String encrypt(byte[] data, SecretKey key) throws Exception {
-        Cipher cipher = Cipher.getInstance("AES");
-        cipher.init(Cipher.ENCRYPT_MODE, key);
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        
+        // Create a new iv
+        IV = new byte[12];
+        new SecureRandom().nextBytes(IV);
+
+        cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key.getEncoded(), "AES"), new GCMParameterSpec(128, IV));
+        
+        // Return the encryped key
         return Base64.getEncoder().encodeToString(cipher.doFinal(data));
     }
     // Each client that is connected should have its own thread
@@ -340,20 +365,22 @@ class HandleClientConnections implements Runnable{
             // Send input to the client
             DataOutputStream send = new DataOutputStream(socket.getOutputStream());
             
-            // Run the chap protocol
+            // Run the CHAP protocol
             runCHAP(recieve, send);
-
-            // Get the ticket request from the client 
             
-            // Derive the root key from password and use username as salt
+            // Get the ticket request from the client which is the service and username
+            service = recieve.readUTF();
+            
+            // Encrypt the session key using the root key
             deriveRootKey(password, userName);
+            sessionKey = generateSessionKey();
+            String encryptedSessionkey = encrypt(sessionKey.getBytes(), rootKey);
+            Ticket ticket = new Ticket(encryptedSessionkey, userName, service, IV, "60000", System.currentTimeMillis()); // Create a new ticket
 
-            KeyGenerator keyGen = KeyGenerator.getInstance("AES");
-            keyGen.init(256);
-            SecretKey sessionKey = keyGen.generateKey(); // Generate the session key
-
-            // Encrypt the secret key
-            encrypt(sessionKey.getEncoded(), rootKey);
+            //Send ticket data back to the client
+            send.writeUTF(ticket.serialize());
+            send.writeUTF(encryptedSessionkey);
+            
 
         } catch (Exception e) {
             

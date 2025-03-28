@@ -2,123 +2,262 @@ package echoservice;
 
 import merrimackutil.json.JsonIO;
 import merrimackutil.json.types.JSONObject;
-import merrimackutil.json.types.JSONType;
 import merrimackutil.util.NonceCache;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.InvalidObjectException;
-import java.net.Socket;
-import java.security.SecureRandom;
-import java.util.Base64;
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
+import kdcd.Ticket;
+
+import java.io.*;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Base64;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * An echo service that communicates with clients over a secure channel.
+ */
 public class EchoService {
-    private static final String CONFIG_PATH = "config.json";
+    private static final String CONFIG_PATH = "test-data/service-config/config.json";
     private static int port;
     private static String serviceName;
     private static String serviceSecret;
     private static NonceCache nonceCache;
 
-    private static final SecureRandom secureRandom = new SecureRandom();
-    private static final int IV_SIZE = 16;
+    private static final int GCM_TAG_LENGTH = 128; // bits
+    private static final int GCM_IV_LENGTH = 12;   // bytes
 
+    /**
+     * Main method to start the echo service.
+     * @param args
+     */
     public static void main(String[] args) {
         try {
             loadConfig();
-            nonceCache = new NonceCache(32, 60000); // 32-byte nonces, 60s expiration
-            System.out.println("EchoService initialized on port " + port);
+
+            nonceCache = new NonceCache(32, 60000);
+
+            ServerSocket serverSocket = new ServerSocket(port);
+            ExecutorService threadPool = Executors.newFixedThreadPool(10);
+
+            System.out.println("EchoService started on port " + port);
+
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                threadPool.execute(() -> handleClient(clientSocket));
+            }
         } catch (Exception e) {
-            System.err.println("Failed to initialize EchoService: " + e.getMessage());
             e.printStackTrace();
         }
     }
-    
-    private static void loadConfig() throws Exception {
+
+    /**
+     * Load the configuration from the config.json file.
+     * @throws FileNotFoundException
+     * @throws InvalidObjectException
+     */
+    private static void loadConfig() throws FileNotFoundException, InvalidObjectException {
         File configFile = new File(CONFIG_PATH);
-        if (!configFile.exists()) {
-            throw new FileNotFoundException("Config file not found: " + CONFIG_PATH);
-        }
-        
-        JSONType configData = JsonIO.readObject(configFile);
-        if (!(configData instanceof JSONObject)) {
-            throw new InvalidObjectException("Expected JSON object in config file");
-        }
-        
-        JSONObject config = (JSONObject) configData;
-        
-        if (!config.containsKey("port") || !config.containsKey("service-name") || !config.containsKey("service-secret")) {
-            throw new InvalidObjectException("Config file missing required fields");
-        }
-        
-        port = config.getInt("port");
+        JSONObject config = JsonIO.readObject(configFile);
+
         serviceName = config.getString("service-name");
         serviceSecret = config.getString("service-secret");
-    }
+        port = config.getInt("port");
 
-    public void handleClient(Socket clientSocket) {
-        try (DataInputStream in = new DataInputStream(clientSocket.getInputStream());
-             DataOutputStream out = new DataOutputStream(clientSocket.getOutputStream())) {
-            
-            // Step 1: Receive Client Hello (nonce and ticket)
-            String clientHello = in.readUTF();
-            System.out.println("Received Client Hello: " + clientHello);
-            
-            // Step 2: Validate ticket (Placeholder - actual validation needed)
-            if (!validateTicket(clientHello)) {
-                out.writeUTF("Invalid Ticket");
-                return;
-            }
-            
-            // Step 3: Generate fresh nonce and IV
-            String freshNonce = generateNonce();
-            byte[] iv = new byte[IV_SIZE];
-            secureRandom.nextBytes(iv);
-            
-            // Encrypt client's nonce (Placeholder - actual encryption needed)
-            String encryptedNonce = encryptNonce(clientHello, iv);
-            
-            // Step 4: Send handshake response
-            out.writeUTF(freshNonce + "," + Base64.getEncoder().encodeToString(iv) + "," + encryptedNonce);
-            
-            // Step 5: Await and validate client's handshake completion
-            String clientResponse = in.readUTF();
-            if (!validateClientResponse(clientResponse)) {
-                out.writeUTF("Handshake Failed");
-                return;
-            }
-            
-            out.writeUTF("Handshake Successful");
-        } catch (Exception e) {
-            e.printStackTrace();
+        if (serviceName == null || serviceSecret == null || port <= 0) {
+            throw new InvalidObjectException("Invalid configuration in config.json");
         }
     }
 
-    private boolean validateTicket(String ticket) {
-        // Placeholder for actual ticket validation logic
-        return ticket.contains("valid");
+    /**
+     * Handle a client connection.
+     * @param clientSocket
+     */
+    private static void handleClient(Socket clientSocket) {
+        try (DataInputStream input = new DataInputStream(clientSocket.getInputStream());
+             DataOutputStream output = new DataOutputStream(clientSocket.getOutputStream())) {
+
+            // Step 1: Handshake Phase
+            String ticket = input.readUTF();
+            String clientNonce = input.readUTF();
+
+            // Validate ticket and extract session key
+            SecretKey sessionKey = validateTicket(ticket);
+            if (sessionKey == null) {
+                output.writeUTF("Invalid ticket");
+                return;
+            }
+
+            String serviceNonce = generateNonce();
+            byte[] iv = generateIV();
+
+            String encryptedClientNonce = encrypt(clientNonce, sessionKey, iv);
+
+            // Send handshake response
+            output.writeUTF(serviceName);
+            output.writeUTF(serviceNonce);
+            output.writeUTF(Base64.getEncoder().encodeToString(iv));
+            output.writeUTF(encryptedClientNonce);
+
+            // Await and validate client's handshake completion
+            String clientResponse = input.readUTF();
+            if (!validateClientResponse(clientResponse, serviceNonce, sessionKey, iv)) {
+                output.writeUTF("Handshake failed");
+                return;
+            }
+
+            // Step 2: Communication Phase
+            while (true) {
+                String encryptedMessage = input.readUTF();
+                String decryptedMessage = decrypt(encryptedMessage, sessionKey, iv);
+
+                String transformedMessage = decryptedMessage.toUpperCase();
+
+                String encryptedResponse = encrypt(transformedMessage, sessionKey, iv);
+
+                // Send the encrypted response
+                output.writeUTF(encryptedResponse);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                clientSocket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
-    private String generateNonce() {
+    /**
+     * Validates a ticket and extracts the session key.
+     * @param serializedTicket The serialized ticket string.
+     * @return The session key if the ticket is valid, or null if invalid.
+     */
+    private static SecretKey validateTicket(String serializedTicket) {
+        try {
+            Ticket ticket = Ticket.deserialize(serializedTicket);
+
+            if (!ticket.getService().equals(serviceName)) {
+                System.err.println("Invalid service name in ticket");
+                return null;
+            }
+
+            long currentTime = System.currentTimeMillis();
+            long ticketTime = ticket.getTimeStamp();
+            long validityPeriod = Long.parseLong(ticket.getValidityTime());
+            if (currentTime > ticketTime + validityPeriod) {
+                System.err.println("Ticket has expired");
+                return null;
+            }
+
+            String encryptedSessionKey = ticket.getEncryptedSessionKey();
+            Cipher cipher = Cipher.getInstance("AES");
+            SecretKey secretKey = new SecretKeySpec(serviceSecret.getBytes(), "AES");
+            cipher.init(Cipher.DECRYPT_MODE, secretKey);
+            byte[] decryptedSessionKeyBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedSessionKey));
+
+            return new SecretKeySpec(decryptedSessionKeyBytes, "AES");
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /**
+     * Generate a fresh nonce.
+     * @return a fresh nonce
+     */
+    private static String generateNonce() {
         byte[] nonce = new byte[16];
-        secureRandom.nextBytes(nonce);
+        new java.security.SecureRandom().nextBytes(nonce);
         return Base64.getEncoder().encodeToString(nonce);
     }
-    
-    private String encryptNonce(String nonce, byte[] iv) throws Exception {
-        // Placeholder for encryption logic
-        return Base64.getEncoder().encodeToString(nonce.getBytes());
+
+    /**
+     * Generate a fresh IV.
+     * @return a fresh IV
+     */
+    private static byte[] generateIV() {
+        byte[] iv = new byte[GCM_IV_LENGTH];
+        new java.security.SecureRandom().nextBytes(iv);
+        return iv;
     }
 
-    private boolean validateClientResponse(String response) {
-        // Placeholder for actual client handshake validation logic
-        return response.contains("valid");
+    /**
+     * Encrypt data using the provided key and IV.
+     * @param data
+     * @param key
+     * @param iv
+     * @return the encrypted data
+     * @throws Exception
+     */
+    private static String encrypt(String data, SecretKey key, byte[] iv) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+        cipher.init(Cipher.ENCRYPT_MODE, key, gcmSpec);
+        byte[] encrypted = cipher.doFinal(data.getBytes());
+        return Base64.getEncoder().encodeToString(encrypted);
     }
+
+    /**
+     * Decrypt encrypted data using the provided key and IV.
+     * @param encryptedData
+     * @param key
+     * @param iv
+     * @return the decrypted data
+     * @throws Exception
+     */
+    private static String decrypt(String encryptedData, SecretKey key, byte[] iv) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+        cipher.init(Cipher.DECRYPT_MODE, key, gcmSpec);
+        byte[] decrypted = cipher.doFinal(Base64.getDecoder().decode(encryptedData));
+        return new String(decrypted);
+    }
+
+    /**
+     * Validate the client's response to the handshake.
+     * @param response
+     * @param expectedNonce
+     * @param sessionKey
+     * @param iv
+     * @return true if the response is valid, false otherwise
+     */
+    private static boolean validateClientResponse(String response, String expectedNonce, SecretKey sessionKey, byte[] iv) {
+        try {
+            String decryptedResponse = decrypt(response, sessionKey, iv);
     
+            return decryptedResponse.equals(expectedNonce);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Verifies a decrypted password hash.
+     * @param decryptedHash The decrypted hash to verify.
+     * @return True if the hash matches the expected value, false otherwise.
+     */
     public boolean verifyHash(String decryptedHash) {
-        // Fill in for now, please use same method name if not, update in PasswordVerify
-        throw new UnsupportedOperationException("Unimplemented method 'verifyHash'");
-    }
+        try {
+            // Compute the expected hash using the service secret
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] expectedHashBytes = md.digest(serviceSecret.getBytes());
+            String expectedHash = Base64.getEncoder().encodeToString(expectedHashBytes);
 
+            return decryptedHash.equals(expectedHash);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
 }
