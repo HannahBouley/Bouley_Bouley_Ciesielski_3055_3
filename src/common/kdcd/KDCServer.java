@@ -7,6 +7,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.Security;
+import java.security.Security;
 import java.security.spec.InvalidKeySpecException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -17,9 +18,12 @@ import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.bouncycastle.crypto.generators.SCrypt;
 import org.bouncycastle.jcajce.spec.ScryptKeySpec;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import merrimackutil.cli.LongOption;
@@ -60,6 +64,8 @@ public class KDCServer{
 
     // Entry point for the server
     public static void main(String[] args) {
+        // Add bc provider
+        Security.addProvider(new BouncyCastleProvider());
         // Add bc provider
         Security.addProvider(new BouncyCastleProvider());
 
@@ -197,12 +203,14 @@ class HandleClientConnections implements Runnable{
     private byte[] IV;
     private static SecretKey rootKey;
     private static String sessionKey;
+    private static String sessionKey;
 
     // Create a new nonce cache
     private static NonceCache nonceCache = new NonceCache(NONCE_SIZE, 60000);
 
     HandleClientConnections(Socket socket){
         this.socket = socket;
+       
        
     }
 
@@ -370,11 +378,16 @@ class HandleClientConnections implements Runnable{
             DataOutputStream send = new DataOutputStream(socket.getOutputStream());
             
             // Run the CHAP protocol
+            // Run the CHAP protocol
             runCHAP(recieve, send);
             
             // Get the ticket request from the client which is the service and username
             service = recieve.readUTF();
             
+            // Get the ticket request from the client which is the service and username
+            service = recieve.readUTF();
+            
+            // Encrypt the session key using the root key
             // Encrypt the session key using the root key
             deriveRootKey(password, userName);
            

@@ -14,17 +14,26 @@ public class Ticket {
     private final long timeStamp;
     private final String validityTime;
 
+<<<<<<< HEAD
     public Ticket(String encryptedSessionKey, String clientUSername, String serviceName, byte[] Iv, String validityTime, long timeStamp) {
         // Null check for constructor parameters
         if (encryptedSessionKey == null || clientUSername == null || serviceName == null || Iv == null) {
             throw new IllegalArgumentException("One or more required fields are null");
         }
+=======
+    public Ticket(String encryptedSessionKey, String clientUSername, String serviceName, byte[] Iv, String validityTime, long timeStamp){
+>>>>>>> 7ecfe897bdc02a5431cc3fbe12ee738c6982db59
         this.encryptedSessionKey = encryptedSessionKey;
         this.clientUsername = clientUSername;
         this.serviceName = serviceName;
         this.IV = Iv;
         this.timeStamp = timeStamp;
+<<<<<<< HEAD
         this.validityTime = validityTime;
+=======
+        this.validityTime =validityTime;
+    
+>>>>>>> 7ecfe897bdc02a5431cc3fbe12ee738c6982db59
     }
 
     /**
@@ -79,6 +88,7 @@ public class Ticket {
      * Serializes ticket data into a form that it can be transported
      * @return
      */
+<<<<<<< HEAD
     public String serialize() {
         // Null check for IV before Base64 encoding
         if (IV == null) {
@@ -101,10 +111,19 @@ public class Ticket {
     
     /**
      * Gets ticket data from a serialized form
+=======
+    public String serialize(){
+        return encryptedSessionKey + "," + clientUsername + "," + serviceName + "," + IV + "," + validityTime + "," + String.valueOf(timeStamp);
+    }
+
+    /**
+     * Gets ticket data from a serialized from
+>>>>>>> 7ecfe897bdc02a5431cc3fbe12ee738c6982db59
      * @param data
      * @return
      */
     public static Ticket deserialize(String data) {
+<<<<<<< HEAD
         
         String[] parts = data.split(",");
         if (parts.length != 6) {
@@ -138,3 +157,9 @@ public class Ticket {
         );
     }
 }
+=======
+        String[] parts = data.split(",");
+        return new Ticket(parts[0], parts[1], parts[2], Base64.getDecoder().decode(parts[3]), parts[4], Long.parseLong(parts[5]));
+    }
+}
+>>>>>>> 7ecfe897bdc02a5431cc3fbe12ee738c6982db59
