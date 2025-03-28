@@ -194,7 +194,7 @@ class HandleClientConnections implements Runnable{
     private static String userName;
     private static String password;
     private String service;
-    private static byte[] IV;
+    private byte[] IV;
     private static SecretKey rootKey;
     private static String sessionKey;
 
@@ -307,33 +307,30 @@ class HandleClientConnections implements Runnable{
      * 
      * @param password
      */
-    private static void deriveRootKey(String password, String salt) {
-       
-            try {
-                SecretKeyFactory skf = SecretKeyFactory.getInstance("SCRYPT");
-                ScryptKeySpec spec = new ScryptKeySpec(password.toCharArray(),
-                    salt.getBytes(), 2048, 8, 1, 128);
-                rootKey = skf.generateSecret(spec);
-
-              } catch (NoSuchAlgorithmException nae) {
-                    nae.printStackTrace();
-              } catch (InvalidKeySpecException kse) {
-                    kse.printStackTrace();
-              }
+    private static void deriveRootKey(String password, String username) {
+        try {
+            // Use the same salt derivation as the client
+            byte[] salt = Base64.getEncoder().encode(username.getBytes(StandardCharsets.UTF_8));
+            SecretKeyFactory skf = SecretKeyFactory.getInstance("SCRYPT");
+            ScryptKeySpec spec = new ScryptKeySpec(password.toCharArray(), salt, 2048, 8, 1, 128);
+            rootKey = skf.generateSecret(spec);
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+            e.printStackTrace();
+        }
     }
+    
 
     /**
      * Generates a session key and returns it as a Base64 encoded String
      * @return
      * @throws NoSuchAlgorithmException
      */
-    public static String generateSessionKey() throws NoSuchAlgorithmException{
-
-           KeyGenerator keyGen = KeyGenerator.getInstance("AES");
-           keyGen.init(256);
-           SecretKey sessionKey = keyGen.generateKey(); // Generate the session key
-           return Base64.getEncoder().encodeToString(sessionKey.getEncoded());
+    public static SecretKey generateSessionKey() throws NoSuchAlgorithmException {
+        KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+        keyGen.init(256);
+        return keyGen.generateKey(); 
     }
+    
 
     /**
      * Encrypt data using a secret key
@@ -342,21 +339,28 @@ class HandleClientConnections implements Runnable{
      * @return
      * @throws Exception
      */
-    public static String encrypt(byte[] data, SecretKey key) throws Exception {
+    public static String encrypt(byte[] data, SecretKey key, byte[] ivOut) throws Exception {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         
-        // Create a new iv
-        IV = new byte[12];
+        // Generate a new IV for this encryption (12 bytes for GCM)
+        byte[] IV = new byte[12];
         new SecureRandom().nextBytes(IV);
-
+        
+        // Copy the IV into ivOut (which should be a preallocated byte array of length 12)
+        System.arraycopy(IV, 0, ivOut, 0, IV.length);
+        
         cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key.getEncoded(), "AES"), new GCMParameterSpec(128, IV));
         
-        // Return the encryped key
+        // Return the encrypted data as a Base64 encoded string
         return Base64.getEncoder().encodeToString(cipher.doFinal(data));
     }
+
+    
     // Each client that is connected should have its own thread
     @Override
     public void run() {
+
+        
         try {
 
             // Recieve input from the client
@@ -373,13 +377,17 @@ class HandleClientConnections implements Runnable{
             
             // Encrypt the session key using the root key
             deriveRootKey(password, userName);
-            sessionKey = generateSessionKey();
-            String encryptedSessionkey = encrypt(sessionKey.getBytes(), rootKey);
-            Ticket ticket = new Ticket(encryptedSessionkey, userName, service, IV, "60000", System.currentTimeMillis()); // Create a new ticket
-
-            //Send ticket data back to the client
+           
+            SecretKey sessionKeyObj = generateSessionKey();  // Get the SecretKey
+            byte[] iv = new byte[12];
+            new SecureRandom().nextBytes(iv); // This will generate a random IV
+            String encryptedSessionKey = encrypt(sessionKeyObj.getEncoded(), rootKey, iv);
+            Ticket ticket = new Ticket(encryptedSessionKey, userName, service, iv, "60000", System.currentTimeMillis());
+            
+            // Send the ticket and the encrypted session key
             send.writeUTF(ticket.serialize());
-            send.writeUTF(encryptedSessionkey);
+            send.writeUTF(encryptedSessionKey);
+        
             
 
         } catch (Exception e) {
